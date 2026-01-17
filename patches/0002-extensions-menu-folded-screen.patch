@@ -1,0 +1,80 @@
+diff --git a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionListContainer.java b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionListContainer.java
+index b562c664a8..6f72cffb09 100644
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionListContainer.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionListContainer.java
+@@ -11,14 +11,19 @@ import android.view.ViewGroup;
+ 
+ import org.chromium.build.annotations.NullMarked;
+ import org.chromium.build.annotations.Nullable;
++import org.chromium.chrome.browser.foldable.FoldablePostureController;
+ import org.chromium.chrome.browser.ui.extensions.R;
+ 
+ /**
+  * A container for extension action buttons. This container will automatically hide any buttons that
+- * overflow the available width.
++ * overflow the available width. On foldable devices in folded state, limits visible extensions
++ * to preserve toolbar space.
+  */
+ @NullMarked
+ class ExtensionActionListContainer extends ViewGroup {
++    /** Maximum number of extension buttons to show when device is folded. */
++    private static final int MAX_EXTENSIONS_WHEN_FOLDED = 2;
++
+     public ExtensionActionListContainer(Context context) {
+         super(context);
+     }
+@@ -27,6 +32,26 @@ class ExtensionActionListContainer extends ViewGroup {
+         super(context, attrs);
+     }
+ 
++    /**
++     * Check if we should limit the number of visible extensions.
++     * Returns true when device is foldable and in folded state.
++     */
++    private boolean shouldLimitExtensions() {
++        if (!FoldablePostureController.isFoldableDevice()) {
++            return false;
++        }
++        FoldablePostureController controller = FoldablePostureController.getInstance();
++        return controller.isFolded();
++    }
++
++    /**
++     * Get the maximum number of extensions to show.
++     * Returns limited count when folded, or Integer.MAX_VALUE when unfolded.
++     */
++    private int getMaxVisibleExtensions() {
++        return shouldLimitExtensions() ? MAX_EXTENSIONS_WHEN_FOLDED : Integer.MAX_VALUE;
++    }
++
+     @Override
+     public LayoutParams generateLayoutParams(AttributeSet attrs) {
+         // This override is needed to support margin attributes.
+@@ -66,6 +91,9 @@ class ExtensionActionListContainer extends ViewGroup {
+         int contentHeight = 0;
+ 
+         final int numChildren = getChildCount();
++        final int maxVisible = getMaxVisibleExtensions();
++        int visibleCount = 0;
++
+         for (int i = 0; i < numChildren; i++) {
+             final View child = getChildAt(i);
+             if (child.getVisibility() == GONE) {
+@@ -80,7 +108,8 @@ class ExtensionActionListContainer extends ViewGroup {
+             final int childHeightWithMargins =
+                     child.getMeasuredHeight() + lp.topMargin + lp.bottomMargin;
+ 
+-            if (childWidthWithMargins > remainingWidth) {
++            // Hide if exceeds max visible (foldable mode) or doesn't fit width
++            if (visibleCount >= maxVisible || childWidthWithMargins > remainingWidth) {
+                 // Measure remaining children with zero size.
+                 final int zeroMeasureSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.EXACTLY);
+                 for (; i < numChildren; i++) {
+@@ -94,6 +123,7 @@ class ExtensionActionListContainer extends ViewGroup {
+             remainingWidth -= childWidthWithMargins;
+             contentWidth += childWidthWithMargins;
+             contentHeight = Math.max(contentHeight, childHeightWithMargins);
++            visibleCount++;
+         }
+ 
+         final int measuredWidth = contentWidth + getPaddingLeft() + getPaddingRight();

@@ -1,0 +1,261 @@
+diff --git a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
+index 13dd08d6d3..8b9e1d306c 100644
+--- a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
++++ b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
+@@ -33,6 +33,7 @@ import org.chromium.components.content_settings.ContentSettingsType;
+ import org.chromium.components.content_settings.PrefNames;
+ import org.chromium.components.prefs.PrefService;
+ import org.chromium.components.user_prefs.UserPrefs;
++import org.chromium.chrome.browser.foldable.FoldablePostureController;
+ import org.chromium.ui.base.DeviceFormFactor;
+ import org.chromium.ui.display.DisplayAndroid;
+ import org.chromium.ui.display.DisplayAndroidManager;
+@@ -275,6 +276,21 @@ public class DesktopSiteUtils {
+         if (!isRequestDesktopSiteContentSettingsGlobal(profile, url)) {
+             return false;
+         }
++
++        // Foldable device posture-based mode switching.
++        // When folded, use mobile mode. When unfolded, use desktop mode.
++        if (FoldablePostureController.isFoldableDevice()) {
++            FoldablePostureController postureController = FoldablePostureController.getInstance();
++            if (postureController.isFolded()) {
++                // Device is folded - use mobile mode
++                return true;
++            } else if (postureController.isUnfolded()) {
++                // Device is unfolded - use desktop mode
++                return false;
++            }
++            // Unknown posture - fall through to width-based detection
++        }
++
+         // Try the window attributes width first.
+         // PCCT has its width stored in window attributes.
+         int widthPixels = -1;
+diff --git a/chrome/browser/ui/android/foldable/BUILD.gn b/chrome/browser/ui/android/foldable/BUILD.gn
+new file mode 100644
+index 0000000000..b88f47e47a
+--- /dev/null
++++ b/chrome/browser/ui/android/foldable/BUILD.gn
+@@ -0,0 +1,18 @@
++# Copyright 2026 The Chromium Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//build/config/android/rules.gni")
++
++android_library("java") {
++  sources = [
++    "java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java",
++  ]
++
++  deps = [
++    "//base:base_java",
++    "//build/android:build_java",
++    "//third_party/androidx:androidx_annotation_annotation_java",
++    "//third_party/androidx:androidx_window_window_java",
++  ]
++}
+diff --git a/chrome/browser/ui/android/foldable/java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java b/chrome/browser/ui/android/foldable/java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java
+new file mode 100644
+index 0000000000..cd842ce65a
+--- /dev/null
++++ b/chrome/browser/ui/android/foldable/java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java
+@@ -0,0 +1,197 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++package org.chromium.chrome.browser.foldable;
++
++import android.app.Activity;
++import android.os.Build;
++
++import androidx.annotation.Nullable;
++import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter;
++import androidx.window.layout.FoldingFeature;
++import androidx.window.layout.WindowInfoTracker;
++import androidx.window.layout.WindowLayoutInfo;
++
++import org.chromium.base.ContextUtils;
++import org.chromium.base.DeviceInfo;
++import org.chromium.base.Log;
++import org.chromium.build.annotations.NullMarked;
++
++import java.util.List;
++import java.util.concurrent.Executor;
++
++/**
++ * Controller for tracking foldable device posture changes.
++ * Provides methods to query current fold state and receive posture change callbacks.
++ */
++@NullMarked
++public class FoldablePostureController {
++    private static final String TAG = "FoldablePosture";
++
++    /** Posture states for foldable devices. */
++    public enum Posture {
++        UNKNOWN,
++        FLAT,      // Device is fully unfolded (tablet-like)
++        HALF_OPEN, // Device is partially folded (tent/laptop mode)
++        FOLDED     // Device is fully folded (phone-like)
++    }
++
++    /** Listener interface for posture changes. */
++    public interface PostureChangeListener {
++        void onPostureChanged(Posture newPosture);
++    }
++
++    private static @Nullable FoldablePostureController sInstance;
++    private static final Object sLock = new Object();
++
++    private Posture mCurrentPosture = Posture.UNKNOWN;
++    private @Nullable WindowInfoTrackerCallbackAdapter mWindowInfoTracker;
++    private @Nullable PostureChangeListener mListener;
++    private boolean mIsTracking;
++
++    /** Get the singleton instance. */
++    public static FoldablePostureController getInstance() {
++        synchronized (sLock) {
++            if (sInstance == null) {
++                sInstance = new FoldablePostureController();
++            }
++            return sInstance;
++        }
++    }
++
++    private FoldablePostureController() {}
++
++    /**
++     * Check if the device is a foldable.
++     * @return true if device has foldable capabilities.
++     */
++    public static boolean isFoldableDevice() {
++        return DeviceInfo.isFoldable();
++    }
++
++    /**
++     * Get the current posture.
++     * @return Current posture state.
++     */
++    public Posture getCurrentPosture() {
++        return mCurrentPosture;
++    }
++
++    /**
++     * Check if device is currently in folded state (phone-like mode).
++     * @return true if folded or half-open, false if flat/unfolded.
++     */
++    public boolean isFolded() {
++        return mCurrentPosture == Posture.FOLDED || mCurrentPosture == Posture.HALF_OPEN;
++    }
++
++    /**
++     * Check if device is in flat/unfolded state (tablet-like mode).
++     * @return true if flat/unfolded.
++     */
++    public boolean isUnfolded() {
++        return mCurrentPosture == Posture.FLAT;
++    }
++
++    /**
++     * Start tracking posture changes for the given activity.
++     * @param activity The activity to track.
++     * @param listener Callback for posture changes.
++     */
++    public void startTracking(Activity activity, @Nullable PostureChangeListener listener) {
++        if (!isFoldableDevice() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
++            Log.d(TAG, "Not a foldable device or API level too low");
++            return;
++        }
++
++        if (mIsTracking) {
++            Log.d(TAG, "Already tracking posture");
++            return;
++        }
++
++        mListener = listener;
++        mIsTracking = true;
++
++        try {
++            WindowInfoTracker tracker = WindowInfoTracker.getOrCreate(activity);
++            mWindowInfoTracker = new WindowInfoTrackerCallbackAdapter(tracker);
++
++            Executor executor = ContextUtils.getApplicationContext().getMainExecutor();
++            mWindowInfoTracker.addWindowLayoutInfoListener(activity, executor, this::onWindowLayoutInfoChanged);
++
++            Log.d(TAG, "Started foldable posture tracking");
++        } catch (Exception e) {
++            Log.e(TAG, "Failed to start posture tracking", e);
++            mIsTracking = false;
++        }
++    }
++
++    /**
++     * Stop tracking posture changes.
++     * @param activity The activity that was being tracked.
++     */
++    public void stopTracking(Activity activity) {
++        if (!mIsTracking || mWindowInfoTracker == null) {
++            return;
++        }
++
++        try {
++            mWindowInfoTracker.removeWindowLayoutInfoListener(this::onWindowLayoutInfoChanged);
++        } catch (Exception e) {
++            Log.e(TAG, "Failed to stop posture tracking", e);
++        }
++
++        mWindowInfoTracker = null;
++        mListener = null;
++        mIsTracking = false;
++        Log.d(TAG, "Stopped foldable posture tracking");
++    }
++
++    private void onWindowLayoutInfoChanged(WindowLayoutInfo windowLayoutInfo) {
++        List<FoldingFeature> foldingFeatures =
++                windowLayoutInfo.getDisplayFeatures().stream()
++                        .filter(f -> f instanceof FoldingFeature)
++                        .map(f -> (FoldingFeature) f)
++                        .toList();
++
++        Posture newPosture = determinePosture(foldingFeatures);
++
++        if (newPosture != mCurrentPosture) {
++            Posture oldPosture = mCurrentPosture;
++            mCurrentPosture = newPosture;
++            Log.d(TAG, "Posture changed: " + oldPosture + " -> " + newPosture);
++
++            if (mListener != null) {
++                mListener.onPostureChanged(newPosture);
++            }
++        }
++    }
++
++    private Posture determinePosture(List<FoldingFeature> features) {
++        if (features.isEmpty()) {
++            // No folding features - could be fully folded (cover screen) or non-foldable display
++            // Default to FOLDED for safety on foldable devices
++            return isFoldableDevice() ? Posture.FOLDED : Posture.UNKNOWN;
++        }
++
++        FoldingFeature feature = features.get(0);
++
++        switch (feature.getState()) {
++            case FoldingFeature.State.FLAT:
++                return Posture.FLAT;
++            case FoldingFeature.State.HALF_OPENED:
++                return Posture.HALF_OPEN;
++            default:
++                return Posture.UNKNOWN;
++        }
++    }
++
++    /**
++     * Force a specific posture (for testing).
++     * @param posture The posture to set.
++     */
++    public void setPostureForTesting(Posture posture) {
++        mCurrentPosture = posture;
++    }
++}
