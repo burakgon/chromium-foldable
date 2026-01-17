@@ -1,6 +1,9 @@
 # Chromium source (checked out separately)
 chromium/
 
+# Downloaded releases/APKs
+releases/
+
 # depot_tools (cloned locally)
 depot_tools/
 
