@@ -1,0 +1,28 @@
+# Chromium Android Desktop ARM64 Build Configuration
+# Copy this file to chromium/src/out/Release/args.gn
+
+target_os = "android"
+target_cpu = "arm64"
+
+# Release build settings
+is_debug = false
+is_official_build = true
+is_component_build = false
+
+# Reduce binary size
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+
+# Disable NaCl (deprecated)
+enable_nacl = false
+
+# Android channel
+android_channel = "stable"
+
+# Android Desktop specific - enables desktop mode features
+enable_desktop_android = true
+
+# Optional: Reduce build time by excluding some components
+# exclude_unwind_tables = true
+# enable_iterator_debugging = false

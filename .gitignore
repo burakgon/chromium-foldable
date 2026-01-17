@@ -1,0 +1,19 @@
+# Chromium source (checked out separately)
+chromium/
+
+# depot_tools (cloned locally)
+depot_tools/
+
+# Patch backups created during updates
+patches.backup.*/
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

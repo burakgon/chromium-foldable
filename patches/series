@@ -1,0 +1,7 @@
+# Patch series for Chromium Foldable customizations
+# Patches are applied in order from top to bottom
+# Comment out patches with # to skip them
+#
+# Example patches (create these when you have customizations):
+# 0001-foldable-desktop-mobile-mode-switch.patch
+# 0002-extensions-menu-folded-screen.patch

@@ -1,0 +1,4 @@
+# Upstream Chromium commit hash
+# Update this when syncing to a new version
+# Find commits at: https://chromium.googlesource.com/chromium/src/+log
+HEAD
