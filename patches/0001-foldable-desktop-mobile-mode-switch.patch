@@ -1,3 +1,15 @@
+diff --git a/chrome/browser/ui/android/desktop_site/BUILD.gn b/chrome/browser/ui/android/desktop_site/BUILD.gn
+index c1658b1ed6..f154de969f 100644
+--- a/chrome/browser/ui/android/desktop_site/BUILD.gn
++++ b/chrome/browser/ui/android/desktop_site/BUILD.gn
+@@ -9,6 +9,7 @@ android_library("java") {
+     "java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java",
+   ]
+   deps = [
++    "//chrome/browser/ui/android/foldable:java",
+     "//base:base_java",
+     "//base:base_shared_preferences_java",
+     "//chrome/browser/flags:java",
 diff --git a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
 index 13dd08d6d3..8b9e1d306c 100644
 --- a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
@@ -34,7 +46,7 @@ index 13dd08d6d3..8b9e1d306c 100644
          int widthPixels = -1;
 diff --git a/chrome/browser/ui/android/foldable/BUILD.gn b/chrome/browser/ui/android/foldable/BUILD.gn
 new file mode 100644
-index 0000000000..b88f47e47a
+index 0000000000..bab9c00b1e
 --- /dev/null
 +++ b/chrome/browser/ui/android/foldable/BUILD.gn
 @@ -0,0 +1,18 @@
@@ -52,38 +64,39 @@ index 0000000000..b88f47e47a
 +  deps = [
 +    "//base:base_java",
 +    "//build/android:build_java",
-+    "//third_party/androidx:androidx_annotation_annotation_java",
-+    "//third_party/androidx:androidx_window_window_java",
++    "//third_party/android_sdk:android_window_extensions_java",
++    "//third_party/androidx/local_modifications/window:window_util_java",
 +  ]
 +}
 diff --git a/chrome/browser/ui/android/foldable/java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java b/chrome/browser/ui/android/foldable/java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java
 new file mode 100644
-index 0000000000..cd842ce65a
+index 0000000000..db330be79c
 --- /dev/null
 +++ b/chrome/browser/ui/android/foldable/java/src/org/chromium/chrome/browser/foldable/FoldablePostureController.java
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,210 @@
 +// Copyright 2026 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +package org.chromium.chrome.browser.foldable;
 +
-+import android.app.Activity;
++import android.content.Context;
 +import android.os.Build;
 +
-+import androidx.annotation.Nullable;
-+import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter;
-+import androidx.window.layout.FoldingFeature;
-+import androidx.window.layout.WindowInfoTracker;
-+import androidx.window.layout.WindowLayoutInfo;
++import androidx.window.extensions.core.util.function.Consumer;
++import androidx.window.extensions.layout.DisplayFeature;
++import androidx.window.extensions.layout.FoldingFeature;
++import androidx.window.extensions.layout.WindowLayoutInfo;
 +
 +import org.chromium.base.ContextUtils;
 +import org.chromium.base.DeviceInfo;
 +import org.chromium.base.Log;
 +import org.chromium.build.annotations.NullMarked;
++import org.chromium.build.annotations.Nullable;
++import org.chromium.window.WindowApiCheck;
++import org.chromium.window.WindowUtil;
 +
 +import java.util.List;
-+import java.util.concurrent.Executor;
 +
 +/**
 + * Controller for tracking foldable device posture changes.
@@ -110,7 +123,7 @@ index 0000000000..cd842ce65a
 +    private static final Object sLock = new Object();
 +
 +    private Posture mCurrentPosture = Posture.UNKNOWN;
-+    private @Nullable WindowInfoTrackerCallbackAdapter mWindowInfoTracker;
++    private @Nullable Consumer<WindowLayoutInfo> mWindowLayoutInfoConsumer;
 +    private @Nullable PostureChangeListener mListener;
 +    private boolean mIsTracking;
 +
@@ -159,13 +172,23 @@ index 0000000000..cd842ce65a
 +    }
 +
 +    /**
-+     * Start tracking posture changes for the given activity.
-+     * @param activity The activity to track.
++     * Start tracking posture changes.
++     * @param context The context to use for tracking.
 +     * @param listener Callback for posture changes.
 +     */
-+    public void startTracking(Activity activity, @Nullable PostureChangeListener listener) {
-+        if (!isFoldableDevice() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-+            Log.d(TAG, "Not a foldable device or API level too low");
++    public void startTracking(Context context, @Nullable PostureChangeListener listener) {
++        if (!isFoldableDevice()) {
++            Log.d(TAG, "Not a foldable device");
++            return;
++        }
++
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
++            Log.d(TAG, "API level too low for window extensions");
++            return;
++        }
++
++        if (!WindowApiCheck.isAvailable()) {
++            Log.d(TAG, "Window extensions API not available");
 +            return;
 +        }
 +
@@ -178,48 +201,39 @@ index 0000000000..cd842ce65a
 +        mIsTracking = true;
 +
 +        try {
-+            WindowInfoTracker tracker = WindowInfoTracker.getOrCreate(activity);
-+            mWindowInfoTracker = new WindowInfoTrackerCallbackAdapter(tracker);
-+
-+            Executor executor = ContextUtils.getApplicationContext().getMainExecutor();
-+            mWindowInfoTracker.addWindowLayoutInfoListener(activity, executor, this::onWindowLayoutInfoChanged);
-+
++            mWindowLayoutInfoConsumer = this::onWindowLayoutInfoChanged;
++            WindowUtil.addWindowLayoutInfoListener(context, mWindowLayoutInfoConsumer);
 +            Log.d(TAG, "Started foldable posture tracking");
 +        } catch (Exception e) {
 +            Log.e(TAG, "Failed to start posture tracking", e);
 +            mIsTracking = false;
++            mWindowLayoutInfoConsumer = null;
 +        }
 +    }
 +
 +    /**
 +     * Stop tracking posture changes.
-+     * @param activity The activity that was being tracked.
 +     */
-+    public void stopTracking(Activity activity) {
-+        if (!mIsTracking || mWindowInfoTracker == null) {
++    public void stopTracking() {
++        if (!mIsTracking || mWindowLayoutInfoConsumer == null) {
 +            return;
 +        }
 +
 +        try {
-+            mWindowInfoTracker.removeWindowLayoutInfoListener(this::onWindowLayoutInfoChanged);
++            WindowUtil.removeWindowLayoutInfoListener(mWindowLayoutInfoConsumer);
 +        } catch (Exception e) {
 +            Log.e(TAG, "Failed to stop posture tracking", e);
 +        }
 +
-+        mWindowInfoTracker = null;
++        mWindowLayoutInfoConsumer = null;
 +        mListener = null;
 +        mIsTracking = false;
 +        Log.d(TAG, "Stopped foldable posture tracking");
 +    }
 +
 +    private void onWindowLayoutInfoChanged(WindowLayoutInfo windowLayoutInfo) {
-+        List<FoldingFeature> foldingFeatures =
-+                windowLayoutInfo.getDisplayFeatures().stream()
-+                        .filter(f -> f instanceof FoldingFeature)
-+                        .map(f -> (FoldingFeature) f)
-+                        .toList();
-+
-+        Posture newPosture = determinePosture(foldingFeatures);
++        FoldingFeature foldingFeature = getFirstFoldingFeature(windowLayoutInfo);
++        Posture newPosture = determinePosture(foldingFeature);
 +
 +        if (newPosture != mCurrentPosture) {
 +            Posture oldPosture = mCurrentPosture;
@@ -232,23 +246,34 @@ index 0000000000..cd842ce65a
 +        }
 +    }
 +
-+    private Posture determinePosture(List<FoldingFeature> features) {
++    private @Nullable FoldingFeature getFirstFoldingFeature(WindowLayoutInfo windowLayoutInfo) {
++        List<DisplayFeature> features = windowLayoutInfo.getDisplayFeatures();
 +        if (features.isEmpty()) {
++            return null;
++        }
++
++        for (DisplayFeature feature : features) {
++            if (feature instanceof FoldingFeature) {
++                return (FoldingFeature) feature;
++            }
++        }
++        return null;
++    }
++
++    private Posture determinePosture(@Nullable FoldingFeature feature) {
++        if (feature == null) {
 +            // No folding features - could be fully folded (cover screen) or non-foldable display
 +            // Default to FOLDED for safety on foldable devices
 +            return isFoldableDevice() ? Posture.FOLDED : Posture.UNKNOWN;
 +        }
 +
-+        FoldingFeature feature = features.get(0);
-+
-+        switch (feature.getState()) {
-+            case FoldingFeature.State.FLAT:
-+                return Posture.FLAT;
-+            case FoldingFeature.State.HALF_OPENED:
-+                return Posture.HALF_OPEN;
-+            default:
-+                return Posture.UNKNOWN;
++        int state = feature.getState();
++        if (state == FoldingFeature.STATE_FLAT) {
++            return Posture.FLAT;
++        } else if (state == FoldingFeature.STATE_HALF_OPENED) {
++            return Posture.HALF_OPEN;
 +        }
++        return Posture.UNKNOWN;
 +    }
 +
 +    /**
